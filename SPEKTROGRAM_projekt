@@ -1,0 +1,204 @@
+from scipy.io import wavfile
+from PyQt4.QtCore import *
+from PyQt4.QtGui import *
+import matplotlib.pyplot as plt
+import pyqtgraph as pg
+import sys  # We need sys so that we can pass argv to QApplication
+import os
+import sounddevice as sd
+
+dataToSpectro = 0
+samplingFreqToSpectro = 0
+path = ''
+
+## Always start by initializing Qt (only once per application)
+app = QApplication([])
+
+## Define a top-level widget to hold everything
+w = QWidget()
+w.resize(800, 900)
+# w.setFixedSize(650, 700)
+
+plot2 = pg.PlotWidget()
+pixelmap = QPixmap()
+label = QLabel()
+beginSample = QLineEdit()
+endSample = QLineEdit()
+beginSample.setVisible(False)
+endSample.setVisible(False)
+slider1 = QSlider(Qt.Horizontal)
+slider2 = QSlider(Qt.Horizontal)
+slider1.setVisible(False)
+slider2.setVisible(False)
+slider1.__name = "slider1"
+slider2.__name = "slider2"
+
+def appexit():
+    sys.exit()
+
+def generateFromWave(pl, begin, end, s1, s2):
+    global dataToSpectro
+    global samplingFreqToSpectro
+    global path
+    path = QFileDialog.getOpenFileName(w, 'Open File', '/')
+    samplingFrequency, signalData = wavfile.read(path)
+    #signalData = signalData[: int(samplingFrequency * 3.5)]
+    pl.plot(signalData, clear=True)
+    dataToSpectro = signalData
+    samplingFreqToSpectro = samplingFrequency
+
+    begin.setVisible(True)  # unlock visibility after loading wav file
+    end.setVisible(True)
+    s1.setVisible(True)
+    s2.setVisible(True)
+    s1.setMaximum(len(signalData))
+    s2.setMaximum(len(signalData))
+
+def generateSpectro(l, p):
+    plt.title('Spectrogram of a wav file')
+    plt.specgram(dataToSpectro, Fs=samplingFreqToSpectro)
+    #print(os.getcwd())
+    plt.xlabel('Time')
+    plt.ylabel('Frequency')
+    plt.savefig(os.getcwd()+'\spectro.png')
+    plt.clf()
+    p = QPixmap(os.getcwd()+'\spectro.png')
+    l.setPixmap(p)
+    l.show()
+
+def generateFromPart(begin, end):
+    global dataToSpectro
+    samplingFrequency, signalData = wavfile.read(path)
+
+    if int(begin.text()) < 0 or int(end.text()) < 0:
+        begin.setText("0")
+        end.setText("0")
+
+    if int(end.text()) > len(signalData):
+        end.setText(QString(len(signalData)))
+    dataToSpectro = signalData[int(begin.text()) : int(end.text())]
+
+def onSliderChanged(slider, begin, end):
+    if "slider1" == slider.__name:
+        begin.setText(str(slider.value()))
+    elif "slider2" == slider.__name:
+        end.setText(str(slider.value()))
+
+def playFromPart(begin, end):
+    print(path)
+    fs, data = wavfile.read(path)
+    sd.play(data[int(begin.text()):int(end.text())], fs)
+
+def recordStart(pl, begin, end, s1, s2):
+    global path
+    global samplingFreqToSpectro
+    global dataToSpectro
+    if samplingFreqToSpectro == 0:
+        samplingFrequency = 8000
+    else:
+        samplingFrequency = samplingFreqToSpectro
+    print(samplingFrequency)
+    seconds = 5
+    myRecording = sd.rec(int(seconds * samplingFrequency), samplerate=samplingFrequency, channels=1)
+    sd.wait()
+    path = os.getcwd() + '\output.wav'
+    wavfile.write(path, samplingFrequency, myRecording)
+    samplingFreqToSpectro, dataToSpectro = wavfile.read(path)
+    dataToSpectro = [data*10000 for data in dataToSpectro][:] # copy and gain by 10000
+
+    pl.plot(dataToSpectro, clear=True)
+    begin.setVisible(True)  # unlock visibility after loading wav file
+    end.setVisible(True)
+    s1.setVisible(True)
+    s2.setVisible(True)
+    s1.setMaximum(len(dataToSpectro))
+    s2.setMaximum(len(dataToSpectro))
+
+def playRecord():
+    global path
+    fs, data = wavfile.read(path)
+    sd.play(data, fs)
+    # status = sd.wait()
+
+def savePartRecordToWav(begin, end):
+    global path
+    freq, samp = wavfile.read(path)
+    wavfile.write(os.getcwd() + '\\recorded_sample.wav', freq, samp[int(begin.text()):int(end.text())])
+
+def aboutMessageBox(widget):
+    QMessageBox.about(widget, "About", "Made by Jaroslaw.")
+
+generateAction = QAction("&Load wav file", w)
+generateAction.setStatusTip('generate waveform from file')
+generateAction.triggered.connect(lambda: generateFromWave(plot2, beginSample, endSample, slider1, slider2))
+
+spectroAction = QAction("&Show spectogram", w)
+spectroAction.setStatusTip('generate spectogram')
+spectroAction.triggered.connect(lambda: generateSpectro(label, pixelmap))
+
+spectroPartWaveAction = QAction("&Take part sample from plot", w)
+spectroPartWaveAction.setStatusTip('generate spectogram from plot')
+spectroPartWaveAction.triggered.connect(lambda: generateFromPart(beginSample, endSample))
+
+playFromSelectedPartAction = QAction("&Play selected part", w)
+playFromSelectedPartAction.setStatusTip('plays sound part from plot')
+playFromSelectedPartAction.triggered.connect(lambda: playFromPart(beginSample, endSample))
+
+startRecordAction = QAction("&Start recording", w)
+startRecordAction.setStatusTip('starts recording and plots waveform')
+startRecordAction.triggered.connect(lambda: recordStart(plot2, beginSample, endSample, slider1, slider2))
+
+playRecordAction = QAction("&Play record", w)
+playRecordAction.setStatusTip('plays record')
+playRecordAction.triggered.connect(lambda: playRecord())
+
+savePartRecordAction = QAction("&Save selected part of record", w)
+savePartRecordAction.setStatusTip('Saves part of record')
+savePartRecordAction.triggered.connect(lambda: savePartRecordToWav(beginSample, endSample))
+
+aboutAction = QAction("&About...", w)
+aboutAction.setStatusTip('about author')
+aboutAction.triggered.connect(lambda: aboutMessageBox(w))
+
+extractAction = QAction("&Exit", w)
+extractAction.setStatusTip('Leave The App')
+extractAction.triggered.connect(appexit)
+
+slider1.valueChanged.connect(lambda: onSliderChanged(slider1, beginSample, endSample))
+slider2.valueChanged.connect(lambda: onSliderChanged(slider2, beginSample, endSample))
+
+mainMenu = QMenuBar(w)
+fileMenu = mainMenu.addMenu('&File')
+fileMenu.addAction(generateAction)
+fileMenu.addAction(extractAction)
+
+editMenu = mainMenu.addMenu('&Edit')
+editMenu.addAction(spectroAction)
+editMenu.addAction(spectroPartWaveAction)
+
+recordMenu = mainMenu.addMenu('&Record')
+recordMenu.addAction(playFromSelectedPartAction)
+recordMenu.addAction(startRecordAction)
+recordMenu.addAction(playRecordAction)
+recordMenu.addAction(savePartRecordAction)
+
+helpMenu = mainMenu.addMenu('&Help')
+helpMenu.addAction(aboutAction)
+
+## Create a grid layout to manage the widgets size and position
+layout = QGridLayout()
+
+w.setLayout(layout)
+## Add widgets to the layout in their proper positions
+layout.addWidget(beginSample, 2, 0)   # button goes in upper-left
+layout.addWidget(label, 0, 1)   # text edit goes in middle-left
+layout.addWidget(endSample, 3, 0)  # list widget goes in bottom-left
+layout.addWidget(plot2, 1, 1)  # plot goes on right side, spanning 3 rows
+layout.addWidget(slider1, 2, 1)
+layout.addWidget(slider2, 3, 1)
+
+# Display the widget as a new window
+w.show()
+
+## Start the Qt event loop
+app.exec_()
